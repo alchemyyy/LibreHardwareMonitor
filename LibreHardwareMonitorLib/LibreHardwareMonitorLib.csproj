@@ -1,8 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFrameworks>net472;netstandard2.0;net8.0;net9.0;net10.0</TargetFrameworks>
-    <Platforms>x64;x86;ARM64</Platforms>
-    <RuntimeIdentifiers>win-x64;win-x86;win-arm64;linux-x64;linux-arm64</RuntimeIdentifiers>
+    <TargetFramework>net10.0</TargetFramework>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <Platform Condition="'$(Platform)' == ''">x64</Platform>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <AssemblyName>LibreHardwareMonitorLib</AssemblyName>
     <RootNamespace>LibreHardwareMonitor</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -31,7 +33,7 @@
   </PropertyGroup>
 
   <!-- AOT/Trimming compatibility for modern .NET -->
-  <PropertyGroup Condition="'$(TargetFramework)' != 'net472' AND '$(TargetFramework)' != 'netstandard2.0'">
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
     <IsAotCompatible>true</IsAotCompatible>
     <IsTrimmable>true</IsTrimmable>
     <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
@@ -40,7 +42,7 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(BuildOnlyRefs)'=='true'">
-    <Platform>AnyCPU</Platform>
+    <Platform>x64</Platform>
     <ProduceOnlyReferenceAssembly>true</ProduceOnlyReferenceAssembly>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
   </PropertyGroup>
@@ -95,8 +97,7 @@
     <Compile Remove="RAMSPDToolkitDriver.cs" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(TargetFramework)' != 'net472'">
-    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
+  <ItemGroup>
     <PackageReference Include="Mono.Posix.NETStandard" Version="1.0.0" />
     <PackageReference Include="System.IO.FileSystem.AccessControl" Version="5.0.0" />
     <PackageReference Include="System.IO.Ports" Version="10.0.9" />
@@ -109,16 +110,14 @@
     </PackageReference>
     <PackageReference Include="RAMSPDToolkit-NDD" Version="1.5.0" Condition="'$(TargetFramework)' != '' and '$(DisableRamSpd)' != 'true'" />
     <PackageReference Include="System.Management" Version="10.0.9" Condition="'$(TargetFramework)' != '' and '$(DisableIpmiWmi)' != 'true'" />
-    <PackageReference Include="System.Memory" Version="4.6.3" Condition="'$(TargetFramework)' == 'net472'" />
-    <PackageReference Include="System.Threading.AccessControl" Version="10.0.9" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\DiskInfoToolkit\DiskInfoToolkit\DiskInfoToolkit.csproj">
       <SetConfiguration>Configuration=$(Configuration)</SetConfiguration>
-      <SetPlatform>Platform=AnyCPU</SetPlatform>
+      <SetPlatform>Platform=x64</SetPlatform>
       <SetTargetFramework>TargetFramework=net10.0</SetTargetFramework>
-      <SetPlatformTarget>PlatformTarget=AnyCPU</SetPlatformTarget>
+      <SetPlatformTarget>PlatformTarget=x64</SetPlatformTarget>
       <SetGeneratePackageOnBuild>GeneratePackageOnBuild=false</SetGeneratePackageOnBuild>
       <AdditionalProperties>EnableNETAnalyzers=false;TreatWarningsAsErrors=false;GeneratePackageOnBuild=false</AdditionalProperties>
       <GlobalPropertiesToRemove>BaseIntermediateOutputPath;BuildOnlyRefs;IntermediateOutputPath;PublishAot;PublishSingleFile;SelfContained;PublishTrimmed;RuntimeIdentifier;RuntimeIdentifiers;OutputPath;OutDir;PublishDir</GlobalPropertiesToRemove>
@@ -126,11 +125,13 @@
       <PrivateAssets>all</PrivateAssets>
       <Visible>false</Visible>
     </ProjectReference>
-    <ProjectReference Include="..\..\build\HIDSharp\HidSharp.Source.csproj">
+    <!-- FanControlTrayAppDotNET vendors HIDSharp beside LHM, not under build\HIDSharp.
+         Keep this as a source reference so Debug LHM builds have HidDevice/HidStream. -->
+    <ProjectReference Include="..\..\HIDSharp\HidSharp\HidSharp.csproj">
       <SetConfiguration>Configuration=$(Configuration)</SetConfiguration>
-      <SetPlatform>Platform=AnyCPU</SetPlatform>
-      <SetTargetFramework>TargetFramework=netstandard2.0</SetTargetFramework>
-      <SetPlatformTarget>PlatformTarget=AnyCPU</SetPlatformTarget>
+      <SetPlatform>Platform=x64</SetPlatform>
+      <SetTargetFramework>TargetFramework=net10.0</SetTargetFramework>
+      <SetPlatformTarget>PlatformTarget=x64</SetPlatformTarget>
       <GlobalPropertiesToRemove>BaseIntermediateOutputPath;BuildOnlyRefs;IntermediateOutputPath;PublishAot;PublishSingleFile;SelfContained;PublishTrimmed;RuntimeIdentifier;RuntimeIdentifiers;OutputPath;OutDir;PublishDir</GlobalPropertiesToRemove>
       <Private>true</Private>
       <PrivateAssets>all</PrivateAssets>
