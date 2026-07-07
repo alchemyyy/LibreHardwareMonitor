@@ -87,7 +87,10 @@ internal sealed class Farbwerk : Hardware
 
     public override void Update()
     {
-        if (_device.TryOpen(out HidStream stream)) {
+        if (_device.TryOpen(out HidStream stream))
+        {
+            using (stream)
+            {
             int length = stream.Read(_rawData);
 
             if (length != _rawData.Length || _rawData[0] != 0x1)
@@ -114,6 +117,7 @@ internal sealed class Farbwerk : Hardware
             {
                 color.Value = (_rawData[offset] << 8 | _rawData[offset + 1]) / 81.90f;
                 offset += 2;
+            }
             }
         }
         

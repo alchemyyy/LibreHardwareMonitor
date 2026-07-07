@@ -18,11 +18,19 @@ public class ChromeOSEmbeddedControllerIO : IEmbeddedControllerIO
 
     public ChromeOSEmbeddedControllerIO()
     {
-        _pawnModule = new LpcCrOSEc();
+        LpcCrOSEc pawnModule = new();
 
-        if (!Mutexes.WaitEc(10))
+        try
         {
-            throw new BusMutexLockingFailedException();
+            if (!Mutexes.WaitEc(10))
+                throw new BusMutexLockingFailedException();
+
+            _pawnModule = pawnModule;
+        }
+        catch
+        {
+            pawnModule.Close();
+            throw;
         }
     }
 
@@ -61,7 +69,14 @@ public class ChromeOSEmbeddedControllerIO : IEmbeddedControllerIO
         if (!_disposed)
         {
             _disposed = true;
-            Mutexes.ReleaseEc();
+            try
+            {
+                Mutexes.ReleaseEc();
+            }
+            finally
+            {
+                _pawnModule.Close();
+            }
         }
     }
 

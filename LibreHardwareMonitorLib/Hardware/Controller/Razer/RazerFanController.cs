@@ -47,19 +47,27 @@ internal sealed class RazerFanController : Hardware
 
             if (Mutexes.WaitRazer(250))
             {
-                while (FirmwareVersion == null)
+                try
                 {
-                    Thread.Sleep(DEVICE_READ_DELAY_MS);
-
-                    try
+                    while (FirmwareVersion == null)
                     {
-                        Packet response = TryWriteAndRead(packet);
-                        FirmwareVersion = $"{response.Data[0]:D}.{response.Data[1]:D2}.{response.Data[2]:D2}";
-                    }
-                    catch { }
-                }
+                        Thread.Sleep(DEVICE_READ_DELAY_MS);
 
-                Mutexes.ReleaseRazer();
+                        try
+                        {
+                            Packet response = TryWriteAndRead(packet);
+                            FirmwareVersion = $"{response.Data[0]:D}.{response.Data[1]:D2}.{response.Data[2]:D2}";
+                        }
+                        catch (Exception exception)
+                        {
+                            Debug.WriteLine(exception);
+                        }
+                    }
+                }
+                finally
+                {
+                    Mutexes.ReleaseRazer();
+                }
             }
 
             Name = "Razer PWM PC Fan Controller";
@@ -94,51 +102,56 @@ internal sealed class RazerFanController : Hardware
         if (control.ControlMode == ControlMode.Undefined || !Mutexes.WaitRazer(250))
             return;
 
-        if (control.ControlMode == ControlMode.Software)
+        try
         {
-            SetChannelModeToManual(control.Sensor.Index);
-
-            float value = control.SoftwareValue;
-            byte fanSpeed = (byte)(value > 100 ? 100 : value < 0 ? 0 : value);
-
-            var packet = new Packet
+            if (control.ControlMode == ControlMode.Software)
             {
-                SequenceNumber = _sequenceCounter.Next(),
-                DataLength = 3,
-                CommandClass = CommandClass.Pwm,
-                Command = PwmCommand.SetChannelPercent,
-            };
+                SetChannelModeToManual(control.Sensor.Index);
 
-            packet.Data[0] = 0x01;
-            packet.Data[1] = (byte)(0x05 + control.Sensor.Index);
-            packet.Data[2] = fanSpeed;
+                float value = control.SoftwareValue;
+                byte fanSpeed = (byte)(value > 100 ? 100 : value < 0 ? 0 : value);
 
-            TryWriteAndRead(packet);
+                Packet packet = new()
+                {
+                    SequenceNumber = _sequenceCounter.Next(),
+                    DataLength = 3,
+                    CommandClass = CommandClass.Pwm,
+                    Command = PwmCommand.SetChannelPercent,
+                };
 
-            _pwm[control.Sensor.Index] = value;
+                packet.Data[0] = 0x01;
+                packet.Data[1] = (byte)(0x05 + control.Sensor.Index);
+                packet.Data[2] = fanSpeed;
+
+                TryWriteAndRead(packet);
+
+                _pwm[control.Sensor.Index] = value;
+            }
+            else if (control.ControlMode == ControlMode.Default)
+            {
+                SetChannelModeToManual(control.Sensor.Index); // TODO: switch to auto mode here if it enabled before
+
+                Packet packet = new()
+                {
+                    SequenceNumber = _sequenceCounter.Next(),
+                    DataLength = 3,
+                    CommandClass = CommandClass.Pwm,
+                    Command = PwmCommand.SetChannelPercent,
+                };
+
+                packet.Data[0] = 0x01;
+                packet.Data[1] = (byte)(0x05 + control.Sensor.Index);
+                packet.Data[2] = DEFAULT_SPEED_CHANNEL_POWER;
+
+                TryWriteAndRead(packet);
+
+                _pwm[control.Sensor.Index] = DEFAULT_SPEED_CHANNEL_POWER;
+            }
         }
-        else if (control.ControlMode == ControlMode.Default)
+        finally
         {
-            SetChannelModeToManual(control.Sensor.Index); // TODO: switch to auto mode here if it enabled before
-
-            var packet = new Packet
-            {
-                SequenceNumber = _sequenceCounter.Next(),
-                DataLength = 3,
-                CommandClass = CommandClass.Pwm,
-                Command = PwmCommand.SetChannelPercent,
-            };
-
-            packet.Data[0] = 0x01;
-            packet.Data[1] = (byte)(0x05 + control.Sensor.Index);
-            packet.Data[2] = DEFAULT_SPEED_CHANNEL_POWER;
-
-            TryWriteAndRead(packet);
-
-            _pwm[control.Sensor.Index] = DEFAULT_SPEED_CHANNEL_POWER;
+            Mutexes.ReleaseRazer();
         }
-
-        Mutexes.ReleaseRazer();
     }
 
     private int GetChannelSpeed(int channel)
@@ -215,7 +228,7 @@ internal sealed class RazerFanController : Hardware
 
                 if (readPacket.Status == DeviceStatus.Busy)
                 {
-                    var stopwatch = new Stopwatch();
+                    Stopwatch stopwatch = new();
                     stopwatch.Start();
 
                     while (stopwatch.ElapsedMilliseconds < DEVICE_READ_TIMEOUT_MS && readPacket.Status == DeviceStatus.Busy)
@@ -284,13 +297,18 @@ internal sealed class RazerFanController : Hardware
         if (!Mutexes.WaitRazer(250))
             return;
 
-        for (int i = 0; i < CHANNEL_COUNT; i++)
+        try
         {
-            _rpmSensors[i].Value = GetChannelSpeed(i);
-            _pwmControls[i].Value = _pwm[i];
+            for (int i = 0; i < CHANNEL_COUNT; i++)
+            {
+                _rpmSensors[i].Value = GetChannelSpeed(i);
+                _pwmControls[i].Value = _pwm[i];
+            }
         }
-
-        Mutexes.ReleaseRazer();
+        finally
+        {
+            Mutexes.ReleaseRazer();
+        }
     }
 
     private enum DeviceStatus : byte
@@ -358,7 +376,7 @@ internal sealed class RazerFanController : Hardware
 
         public static Packet FromBuffer(byte[] buffer)
         {
-            var packet = new Packet
+            Packet packet = new()
             {
                 ReportId = buffer[0],
                 Status = (DeviceStatus)buffer[1],

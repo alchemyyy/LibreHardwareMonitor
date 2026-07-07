@@ -28,7 +28,7 @@ internal sealed class AmdGpu : GenericGpu
     private readonly string _d3dDeviceId;
     private readonly uint _device;
     private readonly Sensor _fan;
-    private readonly Control _fanControl;
+    private Control _fanControl;
     private readonly bool _frameMetricsStarted;
     private readonly Sensor _fullscreenFps;
     private readonly Sensor _gpuDedicatedMemoryUsage;
@@ -63,6 +63,7 @@ internal sealed class AmdGpu : GenericGpu
     private readonly Sensor _temperatureSoC;
     private readonly Sensor _temperatureVddc;
     private readonly ushort _pmLogSampleRate = 1000;
+    private bool _closed;
     private bool _overdrive8LogExists;
 
     public AmdGpu(IntPtr amdContext, AtiAdlxx.ADLAdapterInfo adapterInfo, AtiAdlxx.ADLGcnInfo gcnInfo, ISettings settings)
@@ -159,6 +160,8 @@ internal sealed class AmdGpu : GenericGpu
             ActivateSensor(_memoryTotal);
         }
 
+        try
+        {
         int supported = 0;
         int enabled = 0;
         int version = 0;
@@ -256,6 +259,12 @@ internal sealed class AmdGpu : GenericGpu
         _controlSensor.Control = _fanControl;
 
         Update();
+        }
+        catch
+        {
+            Close();
+            throw;
+        }
     }
 
     public int BusNumber { get; }
@@ -661,26 +670,55 @@ internal sealed class AmdGpu : GenericGpu
 
     public override void Close()
     {
-        _fanControl.ControlModeChanged -= ControlModeChanged;
-        _fanControl.SoftwareControlValueChanged -= SoftwareControlValueChanged;
+        if (_closed)
+            return;
 
-        if (_fanControl.ControlMode != ControlMode.Undefined)
-            SetDefaultFanSpeed();
+        _closed = true;
 
-        if (_frameMetricsStarted)
-            AtiAdlxx.ADL2_Adapter_FrameMetrics_Stop(_context, _adapterInfo.AdapterIndex, 0);
-
-        if (_pmLogStarted && _device != 0)
+        try
         {
-            AtiAdlxx.ADL2_Adapter_PMLog_Stop(_context, _adapterInfo.AdapterIndex, _device);
-        }
+            if (_fanControl != null)
+            {
+                _fanControl.ControlModeChanged -= ControlModeChanged;
+                _fanControl.SoftwareControlValueChanged -= SoftwareControlValueChanged;
 
-        if (_device != 0)
+                if (_fanControl.ControlMode != ControlMode.Undefined)
+                    SetDefaultFanSpeed();
+            }
+        }
+        finally
         {
-            AtiAdlxx.ADL2_Device_PMLog_Device_Destroy(_context, _device);
+            try
+            {
+                ReleaseAdlResources();
+            }
+            finally
+            {
+                base.Close();
+            }
         }
+    }
 
-        base.Close();
+    private void ReleaseAdlResources()
+    {
+        try
+        {
+            if (_frameMetricsStarted)
+                AtiAdlxx.ADL2_Adapter_FrameMetrics_Stop(_context, _adapterInfo.AdapterIndex, 0);
+        }
+        finally
+        {
+            try
+            {
+                if (_pmLogStarted && _device != 0)
+                    AtiAdlxx.ADL2_Adapter_PMLog_Stop(_context, _adapterInfo.AdapterIndex, _device);
+            }
+            finally
+            {
+                if (_device != 0)
+                    AtiAdlxx.ADL2_Device_PMLog_Device_Destroy(_context, _device);
+            }
+        }
     }
 
     public override string GetReport()

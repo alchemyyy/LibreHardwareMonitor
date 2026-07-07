@@ -19,9 +19,12 @@ internal class AmdGpuGroup : IGroup
     private readonly List<AmdGpu> _hardware = new();
     private readonly StringBuilder _report = new();
     private readonly AtiAdlxx.ADLStatus _status;
+    private bool _closed;
 
     public AmdGpuGroup(ISettings settings)
     {
+        List<AmdGpu> potentialHardware = new();
+
         try
         {
             _status = AtiAdlxx.ADL2_Main_Control_Create(AtiAdlxx.Main_Memory_Alloc, 1, ref _context);
@@ -43,8 +46,6 @@ internal class AmdGpuGroup : IGroup
 
                 if (numberOfAdapters > 0)
                 {
-                    List<AmdGpu> potentialHardware = new();
-
                     AtiAdlxx.ADLAdapterInfo[] adapterInfo = new AtiAdlxx.ADLAdapterInfo[numberOfAdapters];
                     if (AtiAdlxx.ADL2_Adapter_AdapterInfo_Get(ref _context, adapterInfo) == AtiAdlxx.ADLStatus.ADL_OK)
                     {
@@ -93,21 +94,24 @@ internal class AmdGpuGroup : IGroup
                                 AtiAdlxx.ADL_Method_Exists(nameof(AtiAdlxx.ADL2_Adapter_PMLog_Support_Get)) &&
                                 AtiAdlxx.ADL_Method_Exists(nameof(AtiAdlxx.ADL2_Device_PMLog_Device_Create)))
                             {
-                                if (AtiAdlxx.ADLStatus.ADL_OK == AtiAdlxx.ADL2_Device_PMLog_Device_Create(_context, adapterInfo[i].AdapterIndex, ref device) &&
-                                    AtiAdlxx.ADLStatus.ADL_OK == AtiAdlxx.ADL2_Adapter_PMLog_Support_Get(_context, adapterInfo[i].AdapterIndex, ref pmLogSupportInfo))
+                                try
                                 {
-                                    int k = 0;
-                                    while (pmLogSupportInfo.usSensors[k] != (ushort)AtiAdlxx.ADLPMLogSensors.ADL_SENSOR_MAXTYPES)
+                                    if (AtiAdlxx.ADLStatus.ADL_OK == AtiAdlxx.ADL2_Device_PMLog_Device_Create(_context, adapterInfo[i].AdapterIndex, ref device) &&
+                                        AtiAdlxx.ADLStatus.ADL_OK == AtiAdlxx.ADL2_Adapter_PMLog_Support_Get(_context, adapterInfo[i].AdapterIndex, ref pmLogSupportInfo))
                                     {
-                                        k++;
+                                        int k = 0;
+                                        while (pmLogSupportInfo.usSensors[k] != (ushort)AtiAdlxx.ADLPMLogSensors.ADL_SENSOR_MAXTYPES)
+                                        {
+                                            k++;
+                                        }
+                                        sensorsSupported = k;
                                     }
-                                    sensorsSupported = k;
+                                    _report.AppendLine("Sensors Supported: " + sensorsSupported);
                                 }
-                                _report.AppendLine("Sensors Supported: " + sensorsSupported);
-
-                                if (device != 0)
+                                finally
                                 {
-                                    AtiAdlxx.ADL2_Device_PMLog_Device_Destroy(_context, device);
+                                    if (device != 0)
+                                        AtiAdlxx.ADL2_Device_PMLog_Device_Destroy(_context, device);
                                 }
                             }
 
@@ -131,20 +135,66 @@ internal class AmdGpuGroup : IGroup
                     foreach (IGrouping<string, AmdGpu> amdGpus in potentialHardware.GroupBy(x => $"{x.BusNumber}-{x.DeviceNumber}"))
                     {
                         AmdGpu amdGpu = amdGpus.OrderByDescending(x => x.Sensors.Length).FirstOrDefault();
+                        bool selectedAdded = false;
                         if (amdGpu != null && !IsAlreadyAdded(amdGpu.BusNumber, amdGpu.DeviceNumber))
+                        {
                             _hardware.Add(amdGpu);
+                            selectedAdded = true;
+                        }
+
+                        foreach (AmdGpu potentialGpu in amdGpus)
+                        {
+                            if (selectedAdded && ReferenceEquals(potentialGpu, amdGpu))
+                                continue;
+
+                            potentialGpu.Close();
+                        }
                     }
+
+                    potentialHardware.Clear();
                 }
             }
         }
-        catch (DllNotFoundException)
-        { }
+        catch (DllNotFoundException exception)
+        {
+            System.Diagnostics.Debug.WriteLine(exception);
+            ClosePotentialHardware(potentialHardware);
+            Close();
+        }
         catch (EntryPointNotFoundException e)
         {
             _report.AppendLine();
             _report.AppendLine(e.ToString());
             _report.AppendLine();
+            ClosePotentialHardware(potentialHardware);
+            Close();
         }
+        catch (Exception exception)
+        {
+            _report.AppendLine();
+            _report.AppendLine(exception.ToString());
+            _report.AppendLine();
+            ClosePotentialHardware(potentialHardware);
+            Close();
+            throw;
+        }
+    }
+
+    private static void ClosePotentialHardware(List<AmdGpu> potentialHardware)
+    {
+        foreach (AmdGpu gpu in potentialHardware)
+        {
+            try
+            {
+                gpu.Close();
+            }
+            catch (Exception exception)
+            {
+                System.Diagnostics.Debug.WriteLine(exception);
+            }
+        }
+
+        potentialHardware.Clear();
     }
 
     private bool IsAlreadyAdded(int busNumber, int deviceNumber)
@@ -168,15 +218,33 @@ internal class AmdGpuGroup : IGroup
 
     public void Close()
     {
+        if (_closed)
+            return;
+
+        _closed = true;
+
+        foreach (AmdGpu gpu in _hardware)
+        {
+            try
+            {
+                gpu.Close();
+            }
+            catch (Exception exception)
+            {
+                System.Diagnostics.Debug.WriteLine(exception);
+            }
+        }
+
+        _hardware.Clear();
+
         try
         {
-            foreach (AmdGpu gpu in _hardware)
-                gpu.Close();
-
-            if (_status == AtiAdlxx.ADLStatus.ADL_OK && _context != IntPtr.Zero)
+            if (_context != IntPtr.Zero)
                 AtiAdlxx.ADL2_Main_Control_Destroy(_context);
         }
-        catch (Exception)
-        { }
+        catch (Exception exception)
+        {
+            System.Diagnostics.Debug.WriteLine(exception);
+        }
     }
 }

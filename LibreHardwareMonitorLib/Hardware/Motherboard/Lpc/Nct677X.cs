@@ -660,6 +660,8 @@ internal class Nct677X : ISuperIO
         if (!Mutexes.WaitIsaBus(10))
             return;
 
+        try
+        {
         if (value.HasValue)
         {
             SaveDefaultFanControl(index);
@@ -729,8 +731,11 @@ internal class Nct677X : ISuperIO
         {
             RestoreDefaultFanControl(index);
         }
-
-        Mutexes.ReleaseIsaBus();
+        }
+        finally
+        {
+            Mutexes.ReleaseIsaBus();
+        }
     }
 
     public void Update()
@@ -741,6 +746,8 @@ internal class Nct677X : ISuperIO
         if (!Mutexes.WaitIsaBus(10))
             return;
 
+        try
+        {
         DisableIOSpaceLock();
 
         for (int i = 0; i < Voltages.Length; i++)
@@ -941,7 +948,7 @@ internal class Nct677X : ISuperIO
             }
         }
 
-        var fcrList = _fanCountRegister?.ToList() ?? new List<ushort>();
+        List<ushort> fcrList = _fanCountRegister?.ToList() ?? new List<ushort>();
 
         for (int i = 0; i < Fans.Length; i++)
         {
@@ -994,7 +1001,11 @@ internal class Nct677X : ISuperIO
             }
         }
 
-        Mutexes.ReleaseIsaBus();
+        }
+        finally
+        {
+            Mutexes.ReleaseIsaBus();
+        }
     }
 
     /// <inheritdoc />
@@ -1020,6 +1031,8 @@ internal class Nct677X : ISuperIO
         if (!Mutexes.WaitIsaBus(100))
             return r.ToString();
 
+        try
+        {
         ushort[] addresses =
         {
             0x000,
@@ -1165,9 +1178,12 @@ internal class Nct677X : ISuperIO
 
         r.AppendLine();
 
-        Mutexes.ReleaseIsaBus();
-
         return r.ToString();
+        }
+        finally
+        {
+            Mutexes.ReleaseIsaBus();
+        }
     }
 
     private byte ReadByte(ushort address)

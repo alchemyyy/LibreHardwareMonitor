@@ -167,23 +167,35 @@ internal static class NvidiaML
             }
             else if (IsNvmlCompatibleWindowsVersion())
             {
-                // Attempt to load the Nvidia Management Library from the
-                // windows standard search order for applications. This will
-                // help installations that either have the library in
-                // %windir%/system32 or provide their own library
-                _windowsDll = PInvoke.LoadLibrary(WindowsDllName);
-
-                // If there is no dll in the path, then attempt to load it
-                // from program files
-                if (_windowsDll.IsInvalid)
+                try
                 {
-                    string programFilesDirectory = Environment.ExpandEnvironmentVariables("%ProgramW6432%");
-                    string dllPath = Path.Combine(programFilesDirectory, @"NVIDIA Corporation\NVSMI", WindowsDllName);
+                    // Attempt to load the Nvidia Management Library from the
+                    // windows standard search order for applications. This will
+                    // help installations that either have the library in
+                    // %windir%/system32 or provide their own library
+                    _windowsDll = PInvoke.LoadLibrary(WindowsDllName);
 
-                    _windowsDll = PInvoke.LoadLibrary(dllPath);
+                    // If there is no dll in the path, then attempt to load it
+                    // from program files
+                    if (_windowsDll.IsInvalid)
+                    {
+                        string programFilesDirectory = Environment.ExpandEnvironmentVariables("%ProgramW6432%");
+                        string dllPath = Path.Combine(programFilesDirectory, @"NVIDIA Corporation\NVSMI", WindowsDllName);
+
+                        _windowsDll = PInvoke.LoadLibrary(dllPath);
+                    }
+
+                    IsAvailable = !_windowsDll.IsInvalid && InitialiseDelegates() && (_windowsNvmlInit() == NvmlReturn.Success);
+
+                    if (!IsAvailable)
+                        CloseWindowsDll();
                 }
-
-                IsAvailable = !_windowsDll.IsInvalid && InitialiseDelegates() && (_windowsNvmlInit() == NvmlReturn.Success);
+                catch (Exception exception)
+                {
+                    System.Diagnostics.Debug.WriteLine(exception);
+                    IsAvailable = false;
+                    CloseWindowsDll();
+                }
             }
 
             return IsAvailable;
@@ -267,15 +279,40 @@ internal static class NvidiaML
                 {
                     nvmlShutdown();
                 }
-                else if (!_windowsDll.IsInvalid)
+                else if (_windowsDll != null && !_windowsDll.IsInvalid)
                 {
-                    _windowsNvmlShutdown();
-                    _windowsDll.Dispose();
+                    try
+                    {
+                        _windowsNvmlShutdown();
+                    }
+                    finally
+                    {
+                        CloseWindowsDll();
+                    }
                 }
 
                 IsAvailable = false;
             }
+            else if (!Software.OperatingSystem.IsUnix)
+            {
+                CloseWindowsDll();
+            }
         }
+    }
+
+    private static void CloseWindowsDll()
+    {
+        if (_windowsDll != null && !_windowsDll.IsInvalid)
+            _windowsDll.Dispose();
+
+        _windowsDll = null;
+        _windowsNvmlInit = null;
+        _windowsNvmlShutdown = null;
+        _windowsNvmlDeviceGetHandleByIndex = null;
+        _windowsNvmlDeviceGetHandleByPciBusId = null;
+        _windowsNvmlDeviceGetPcieThroughputDelegate = null;
+        _windowsNvmlDeviceGetPciInfo = null;
+        _windowsNvmlDeviceGetPowerUsage = null;
     }
 
     public static NvmlDevice? NvmlDeviceGetHandleByIndex(int index)

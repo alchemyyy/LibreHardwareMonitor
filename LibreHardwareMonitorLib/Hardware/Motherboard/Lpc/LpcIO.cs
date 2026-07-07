@@ -23,9 +23,14 @@ internal class LpcIO
         if (!Mutexes.WaitIsaBus(100))
             return;
 
-        Detect(motherboard);
-
-        Mutexes.ReleaseIsaBus();
+        try
+        {
+            Detect(motherboard);
+        }
+        finally
+        {
+            Mutexes.ReleaseIsaBus();
+        }
 
 #if !DISABLE_IPMI_WMI
         if (Ipmi.IsBmcPresent())
@@ -68,18 +73,34 @@ internal class LpcIO
     {
         for (int i = 0; i < REGISTER_PORTS.Length; i++)
         {
-            var port = new LpcPort(REGISTER_PORTS[i], VALUE_PORTS[i]);
+            LpcPort port = new(REGISTER_PORTS[i], VALUE_PORTS[i]);
+            bool portClaimed = false;
 
-            if (DetectWinbondFintek(port, motherboard))
-                continue;
+            try
+            {
+                if (DetectWinbondFintek(port, motherboard))
+                {
+                    portClaimed = true;
+                    continue;
+                }
 
-            if (DetectIT87(port, motherboard))
-                continue;
+                if (DetectIT87(port, motherboard))
+                {
+                    portClaimed = true;
+                    continue;
+                }
 
-            if (DetectSmsc(port))
-                continue;
-
-            port.Close();
+                if (DetectSmsc(port))
+                {
+                    portClaimed = true;
+                    continue;
+                }
+            }
+            finally
+            {
+                if (!portClaimed)
+                    port.Close();
+            }
         }
     }
 

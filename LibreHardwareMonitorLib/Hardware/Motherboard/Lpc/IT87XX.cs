@@ -307,40 +307,45 @@ internal class IT87XX : ISuperIO
         if (!Mutexes.WaitIsaBus(10))
             return;
 
-        if (value.HasValue)
+        try
         {
-            SaveDefaultFanPwmControl(index);
-
-            // Disable the controller when setting values to prevent it from overriding them
-            if (_gigabyteController != null)
-                _gigabyteController.Enable(false);
-
-            if (index < 3 && !_initialFanOutputModeEnabled[index])
-                WriteByte(FAN_MAIN_CTRL_REG, (byte)(ReadByte(FAN_MAIN_CTRL_REG, out _) | (1 << index)));
-
-            if (_hasExtReg)
+            if (value.HasValue)
             {
-                if (Chip == Chip.IT8689E)
+                SaveDefaultFanPwmControl(index);
+
+                // Disable the controller when setting values to prevent it from overriding them
+                if (_gigabyteController != null)
+                    _gigabyteController.Enable(false);
+
+                if (index < 3 && !_initialFanOutputModeEnabled[index])
+                    WriteByte(FAN_MAIN_CTRL_REG, (byte)(ReadByte(FAN_MAIN_CTRL_REG, out _) | (1 << index)));
+
+                if (_hasExtReg)
                 {
-                    WriteByte(FAN_PWM_CTRL_REG[index], 0x7F);
+                    if (Chip == Chip.IT8689E)
+                    {
+                        WriteByte(FAN_PWM_CTRL_REG[index], 0x7F);
+                    }
+                    else
+                    {
+                        WriteByte(FAN_PWM_CTRL_REG[index], (byte)(_initialFanPwmControl[index] & 0x7F));
+                    }
+                    WriteByte(FAN_PWM_CTRL_EXT_REG[index], value.Value);
                 }
                 else
                 {
-                    WriteByte(FAN_PWM_CTRL_REG[index], (byte)(_initialFanPwmControl[index] & 0x7F));
+                    WriteByte(FAN_PWM_CTRL_REG[index], (byte)(value.Value >> 1));
                 }
-                WriteByte(FAN_PWM_CTRL_EXT_REG[index], value.Value);
             }
             else
             {
-                WriteByte(FAN_PWM_CTRL_REG[index], (byte)(value.Value >> 1));
+                RestoreDefaultFanPwmControl(index);
             }
         }
-        else
+        finally
         {
-            RestoreDefaultFanPwmControl(index);
+            Mutexes.ReleaseIsaBus();
         }
-
-        Mutexes.ReleaseIsaBus();
     }
 
     public string GetReport()
@@ -362,57 +367,63 @@ internal class IT87XX : ISuperIO
         if (!Mutexes.WaitIsaBus(100))
             return r.ToString();
 
-        if (_requiresBankSelect)
-            SelectBank(0);
-
-        // dump memory of all banks if supported by chip
-        for (byte b = 0; b < _bankCount; b++)
+        try
         {
-            if (SupportsMultipleBanks && b > 0)
+            if (_requiresBankSelect)
+                SelectBank(0);
+
+            // dump memory of all banks if supported by chip
+            for (byte b = 0; b < _bankCount; b++)
             {
-                SelectBank(b);
-            }
-            r.AppendLine($"Environment Controller Registers Bank {b}");
-            r.AppendLine();
-            r.AppendLine("      00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F");
-            r.AppendLine();
-            for (int i = 0; i <= 0xA; i++)
-            {
-                r.Append(" ");
-                r.Append((i << 4).ToString("X2", CultureInfo.InvariantCulture));
-                r.Append("  ");
-                for (int j = 0; j <= 0xF; j++)
+                if (SupportsMultipleBanks && b > 0)
+                {
+                    SelectBank(b);
+                }
+                r.AppendLine($"Environment Controller Registers Bank {b}");
+                r.AppendLine();
+                r.AppendLine("      00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F");
+                r.AppendLine();
+                for (int i = 0; i <= 0xA; i++)
                 {
                     r.Append(" ");
-                    byte value = ReadByte((byte)((i << 4) | j), out bool valid);
-                    r.Append(valid ? value.ToString("X2", CultureInfo.InvariantCulture) : "??");
+                    r.Append((i << 4).ToString("X2", CultureInfo.InvariantCulture));
+                    r.Append("  ");
+                    for (int j = 0; j <= 0xF; j++)
+                    {
+                        r.Append(" ");
+                        byte value = ReadByte((byte)((i << 4) | j), out bool valid);
+                        r.Append(valid ? value.ToString("X2", CultureInfo.InvariantCulture) : "??");
+                    }
+
+                    r.AppendLine();
                 }
 
                 r.AppendLine();
             }
 
+            if (SupportsMultipleBanks)
+            {
+                SelectBank(0);
+            }
+
             r.AppendLine();
-        }
 
-        if (SupportsMultipleBanks)
+            r.AppendLine("GPIO Registers");
+            r.AppendLine();
+            for (int i = 0; i < _gpioCount; i++)
+            {
+                r.Append(" ");
+                r.Append(ReadGpio(i)?.ToString("X2", CultureInfo.InvariantCulture));
+            }
+
+            r.AppendLine();
+            r.AppendLine();
+            return r.ToString();
+        }
+        finally
         {
-            SelectBank(0);
+            Mutexes.ReleaseIsaBus();
         }
-
-        r.AppendLine();
-
-        r.AppendLine("GPIO Registers");
-        r.AppendLine();
-        for (int i = 0; i < _gpioCount; i++)
-        {
-            r.Append(" ");
-            r.Append(ReadGpio(i)?.ToString("X2", CultureInfo.InvariantCulture));
-        }
-
-        r.AppendLine();
-        r.AppendLine();
-        Mutexes.ReleaseIsaBus();
-        return r.ToString();
     }
 
     /// <summary>
@@ -443,115 +454,126 @@ internal class IT87XX : ISuperIO
         if (!Mutexes.WaitIsaBus(10))
             return;
 
-        // Is this needed on every update?  Yes, until a way to detect resume from sleep/hibernation is added, as that invalidates the bank select.
-        if (_requiresBankSelect)
-            SelectBank(0);
-
-        for (int i = 0; i < Voltages.Length; i++)
+        try
         {
-            float value = _voltageGain * ReadByte(IT87_REG_VIN[i], out bool valid);
+            // Is this needed on every update?  Yes, until a way to detect resume from sleep/hibernation is added, as that invalidates the bank select.
+            if (_requiresBankSelect)
+                SelectBank(0);
 
-            if (!valid)
-                continue;
-
-            if (value > 0)
-                Voltages[i] = value;
-            else
-                Voltages[i] = null;
-        }
-
-        for (int i = 0; i < Temperatures.Length; i++)
-        {
-            sbyte value = (sbyte)ReadByte((byte)(TEMPERATURE_BASE_REG + i), out bool valid);
-            if (!valid)
-                continue;
-
-            if (value is < sbyte.MaxValue and > 0)
-                Temperatures[i] = value;
-            else
-                Temperatures[i] = null;
-        }
-
-        if (_has16BitFanCounter)
-        {
-            for (int i = 0; i < Fans.Length; i++)
+            for (int i = 0; i < Voltages.Length; i++)
             {
-                if (_fansDisabled[i])
-                    continue;
+                float value = _voltageGain * ReadByte(IT87_REG_VIN[i], out bool valid);
 
-                int value = ReadByte(_hasAlt6thFanReg ? FAN_TACHOMETER_REG_ALT[i] : FAN_TACHOMETER_REG[i], out bool valid);
                 if (!valid)
                     continue;
 
-                value |= ReadByte(_hasAlt6thFanReg ? FAN_TACHOMETER_EXT_REG_ALT[i] : FAN_TACHOMETER_EXT_REG[i], out valid) << 8;
-                if (!valid)
-                    continue;
-
-                if (value > 0x3f)
-                    Fans[i] = value < 0xffff ? 1.35e6f / (value * 2) : 0;
+                if (value > 0)
+                    Voltages[i] = value;
                 else
-                    Fans[i] = null;
+                    Voltages[i] = null;
             }
-        }
-        else
-        {
-            for (int i = 0; i < Fans.Length; i++)
+
+            for (int i = 0; i < Temperatures.Length; i++)
             {
-                int value = ReadByte(FAN_TACHOMETER_REG[i], out bool valid);
+                sbyte value = (sbyte)ReadByte((byte)(TEMPERATURE_BASE_REG + i), out bool valid);
                 if (!valid)
                     continue;
 
-                int divisor = 2;
-                if (i < 2)
+                if (value is < sbyte.MaxValue and > 0)
+                    Temperatures[i] = value;
+                else
+                    Temperatures[i] = null;
+            }
+
+            if (_has16BitFanCounter)
+            {
+                for (int i = 0; i < Fans.Length; i++)
                 {
-                    int divisors = ReadByte(FAN_TACHOMETER_DIVISOR_REGISTER, out valid);
+                    if (_fansDisabled[i])
+                        continue;
+
+                    int value = ReadByte(_hasAlt6thFanReg ? FAN_TACHOMETER_REG_ALT[i] : FAN_TACHOMETER_REG[i], out bool valid);
                     if (!valid)
                         continue;
 
-                    divisor = 1 << ((divisors >> (3 * i)) & 0x7);
+                    value |= ReadByte(_hasAlt6thFanReg ? FAN_TACHOMETER_EXT_REG_ALT[i] : FAN_TACHOMETER_EXT_REG[i], out valid) << 8;
+                    if (!valid)
+                        continue;
+
+                    if (value > 0x3f)
+                        Fans[i] = value < 0xffff ? 1.35e6f / (value * 2) : 0;
+                    else
+                        Fans[i] = null;
                 }
-
-                if (value > 0)
-                    Fans[i] = value < 0xff ? 1.35e6f / (value * divisor) : 0;
-                else
-                    Fans[i] = null;
-            }
-        }
-
-        for (int i = 0; i < Controls.Length; i++)
-        {
-            byte value = ReadByte(FAN_PWM_CTRL_REG[i], out bool valid);
-            if (!valid)
-                continue;
-
-            if ((value & 0x80) > 0)
-            {
-                // Automatic operation (value can't be read).
-                Controls[i] = null;
             }
             else
             {
-                // Software operation.
-                if (_hasExtReg)
+                for (int i = 0; i < Fans.Length; i++)
                 {
-                    value = ReadByte(FAN_PWM_CTRL_EXT_REG[i], out valid);
-                    if (valid)
-                        Controls[i] = (float)Math.Round(value * 100.0f / 0xFF);
+                    int value = ReadByte(FAN_TACHOMETER_REG[i], out bool valid);
+                    if (!valid)
+                        continue;
+
+                    int divisor = 2;
+                    if (i < 2)
+                    {
+                        int divisors = ReadByte(FAN_TACHOMETER_DIVISOR_REGISTER, out valid);
+                        if (!valid)
+                            continue;
+
+                        divisor = 1 << ((divisors >> (3 * i)) & 0x7);
+                    }
+
+                    if (value > 0)
+                        Fans[i] = value < 0xff ? 1.35e6f / (value * divisor) : 0;
+                    else
+                        Fans[i] = null;
+                }
+            }
+
+            for (int i = 0; i < Controls.Length; i++)
+            {
+                byte value = ReadByte(FAN_PWM_CTRL_REG[i], out bool valid);
+                if (!valid)
+                    continue;
+
+                if ((value & 0x80) > 0)
+                {
+                    // Automatic operation (value can't be read).
+                    Controls[i] = null;
                 }
                 else
                 {
-                    Controls[i] = (float)Math.Round((value & 0x7F) * 100.0f / 0x7F);
+                    // Software operation.
+                    if (_hasExtReg)
+                    {
+                        value = ReadByte(FAN_PWM_CTRL_EXT_REG[i], out valid);
+                        if (valid)
+                            Controls[i] = (float)Math.Round(value * 100.0f / 0xFF);
+                    }
+                    else
+                    {
+                        Controls[i] = (float)Math.Round((value & 0x7F) * 100.0f / 0x7F);
+                    }
                 }
             }
         }
-
-        Mutexes.ReleaseIsaBus();
+        finally
+        {
+            Mutexes.ReleaseIsaBus();
+        }
     }
 
     public void Close()
     {
-        _gigabyteController?.Dispose();
-        _port.Close();
+        try
+        {
+            _gigabyteController?.Dispose();
+        }
+        finally
+        {
+            _port.Close();
+        }
     }
 
     private byte ReadByte(byte register, out bool valid)

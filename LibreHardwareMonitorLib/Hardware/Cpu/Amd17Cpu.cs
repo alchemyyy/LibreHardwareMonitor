@@ -188,6 +188,8 @@ internal sealed class Amd17Cpu : AmdCpu
                 return;
 
             GroupAffinity previousAffinity = ThreadAffinity.Set(cpuId.Affinity);
+            try
+            {
 
             // MSRC001_0299
             // TU [19:16]
@@ -211,6 +213,8 @@ internal sealed class Amd17Cpu : AmdCpu
 
             if (Mutexes.WaitPciBus(10))
             {
+                try
+                {
                 // THM_TCON_CUR_TMP
                 // CUR_TEMP [31:21]
                 uint temperature = _cpu._pawnModule.ReadSmn(F17H_M01H_THM_TCON_CUR_TMP);
@@ -331,8 +335,11 @@ internal sealed class Amd17Cpu : AmdCpu
                 uint ccdTemperatureRegister = GetCcdTemperatureRegister(cpuId);
                 if (ccdTemperatureRegister != 0)
                     UpdateCcdTemperatureSensors(ccdTemperatureRegister);
-
-                Mutexes.ReleasePciBus();
+                }
+                finally
+                {
+                    Mutexes.ReleasePciBus();
+                }
             }
 
             // voltage
@@ -383,6 +390,11 @@ internal sealed class Amd17Cpu : AmdCpu
                             _cpu.ActivateSensor(sensor.Value);
                     }
                 }
+            }
+            }
+            finally
+            {
+                ThreadAffinity.Set(previousAffinity);
             }
         }
 
@@ -691,7 +703,9 @@ internal sealed class Amd17Cpu : AmdCpu
 
         public void ReadPerformanceCounter()
         {
-            ThreadAffinity.Set(Cpu.Affinity);
+            GroupAffinity previousAffinity = ThreadAffinity.Set(Cpu.Affinity);
+            try
+            {
 
             _sampleTime = DateTime.UtcNow;
 
@@ -702,6 +716,11 @@ internal sealed class Amd17Cpu : AmdCpu
             // MSRC000_00E8, C0 state counter
             cpu._pawnModule.ReadMsr(MSR_APERF_RO, out edxeax);
             _aperf = edxeax;
+            }
+            finally
+            {
+                ThreadAffinity.Set(previousAffinity);
+            }
         }
 
         public void UpdateMeasurements()
@@ -803,6 +822,8 @@ internal sealed class Amd17Cpu : AmdCpu
 
             CpuThread thread = Threads[0];
             GroupAffinity previousAffinity = ThreadAffinity.Set(thread.Cpu.Affinity);
+            try
+            {
 
             // MSRC001_0299
             // TU [19:16]
@@ -828,7 +849,7 @@ internal sealed class Amd17Cpu : AmdCpu
             uint msrPstate = eax;
             int curCpuVid = (int)((eax >> 14) & 0xff);
 
-            foreach(CpuThread t in Threads)
+            foreach (CpuThread t in Threads)
             {
                 t.ReadPerformanceCounter();
             }
@@ -936,6 +957,11 @@ internal sealed class Amd17Cpu : AmdCpu
 
                 if (!double.IsNaN(energy))
                     _power.Value = (float)energy;
+            }
+            }
+            finally
+            {
+                ThreadAffinity.Set(previousAffinity);
             }
         }
     }

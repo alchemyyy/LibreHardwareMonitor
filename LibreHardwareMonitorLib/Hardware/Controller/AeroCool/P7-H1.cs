@@ -4,6 +4,7 @@
 // All Rights Reserved.
 
 using System;
+using System.IO;
 using System.Threading.Tasks;
 using HidSharp;
 
@@ -11,11 +12,13 @@ namespace LibreHardwareMonitor.Hardware.Controller.AeroCool;
 
 internal sealed class P7H1 : Hardware
 {
+    private const int READ_TASK_DRAIN_TIMEOUT_MS = 1000;
     private const byte REPORT_ID = 0x0;
     private readonly HidDevice _device;
 
     private readonly Sensor[] _rpm = new Sensor[5];
     private readonly float[] _speeds = new float[5];
+    private readonly Task _readTask;
     private readonly HidStream _stream;
     private bool _running;
 
@@ -29,7 +32,7 @@ internal sealed class P7H1 : Hardware
         {
             _running = true;
 
-            Task.Run(ReadStream);
+            _readTask = Task.Run(ReadStream);
 
             for (int i = 0; i < 5; i++)
             {
@@ -48,41 +51,60 @@ internal sealed class P7H1 : Hardware
 
     private void ReadStream()
     {
-        byte[] inputReportBuffer = new byte[_device.GetMaxInputReportLength()];
-
-        while (_running)
+        try
         {
-            IAsyncResult ar = null;
+            byte[] inputReportBuffer = new byte[_device.GetMaxInputReportLength()];
 
             while (_running)
             {
-                ar ??= _stream.BeginRead(inputReportBuffer, 0, inputReportBuffer.Length, null, null);
+                IAsyncResult ar = null;
 
-                if (ar.IsCompleted)
+                while (_running)
                 {
-                    int byteCount = _stream.EndRead(ar);
-                    ar = null;
+                    ar ??= _stream.BeginRead(inputReportBuffer, 0, inputReportBuffer.Length, null, null);
 
-                    if (byteCount == 16 && inputReportBuffer[0] == REPORT_ID)
+                    if (ar.IsCompleted)
                     {
-                        for (int i = 0; i < 5; i++)
+                        int byteCount = _stream.EndRead(ar);
+                        ar = null;
+
+                        if (byteCount == 16 && inputReportBuffer[0] == REPORT_ID)
                         {
-                            _speeds[i] = (inputReportBuffer[(i * 3) + 2] * 256) + inputReportBuffer[(i * 3) + 3];
+                            for (int i = 0; i < 5; i++)
+                            {
+                                _speeds[i] = (inputReportBuffer[(i * 3) + 2] * 256) + inputReportBuffer[(i * 3) + 3];
+                            }
                         }
                     }
-                }
-                else
-                {
-                    ar.AsyncWaitHandle.WaitOne(1000);
+                    else
+                    {
+                        ar.AsyncWaitHandle.WaitOne(1000);
+                    }
                 }
             }
+        }
+        catch (ObjectDisposedException)
+        {
+            _running = false;
+        }
+        catch (IOException)
+        {
+            _running = false;
         }
     }
 
     public override void Close()
     {
         _running = false;
-        _stream.Close();
+        _stream?.Close();
+        try
+        {
+            _readTask?.Wait(READ_TASK_DRAIN_TIMEOUT_MS);
+        }
+        catch (AggregateException exception)
+        {
+            System.Diagnostics.Debug.WriteLine(exception);
+        }
         base.Close();
     }
 

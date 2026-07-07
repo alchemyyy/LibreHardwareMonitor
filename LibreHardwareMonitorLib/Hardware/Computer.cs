@@ -510,16 +510,80 @@ public class Computer : IComputer
         if (_open)
             return;
 
-        _smbios = new SMBios();
+        bool mutexesOpened = false;
+        bool opCodeOpened = false;
 
-        if (Software.OperatingSystem.IsWindows8OrGreater)
-            Mutexes.Open();
+        try
+        {
+            _smbios = new SMBios();
 
-        OpCode.Open();
+            if (Software.OperatingSystem.IsWindows8OrGreater)
+            {
+                Mutexes.Open();
+                mutexesOpened = true;
+            }
 
-        AddGroups();
+            OpCode.Open();
+            opCodeOpened = true;
 
-        _open = true;
+            AddGroups();
+
+            _open = true;
+        }
+        catch
+        {
+            RollbackOpen(mutexesOpened, opCodeOpened);
+            throw;
+        }
+    }
+
+    private void RollbackOpen(bool mutexesOpened, bool opCodeOpened)
+    {
+        try
+        {
+            List<IGroup> groups = new();
+
+            lock (_lock)
+            {
+                for (int index = _groups.Count - 1; index >= 0; index--)
+                    groups.Add(_groups[index]);
+
+                _groups.Clear();
+            }
+
+            foreach (IGroup group in groups)
+            {
+                try
+                {
+                    foreach (IHardware hardware in group.Hardware)
+                        HardwareRemoved(hardware);
+                }
+                catch (Exception exception)
+                {
+                    System.Diagnostics.Debug.WriteLine(exception);
+                }
+
+                try
+                {
+                    group.Close();
+                }
+                catch (Exception exception)
+                {
+                    System.Diagnostics.Debug.WriteLine(exception);
+                }
+            }
+        }
+        finally
+        {
+            if (opCodeOpened)
+                OpCode.Close();
+
+            if (mutexesOpened)
+                Mutexes.Close();
+
+            _smbios = null;
+            _open = false;
+        }
     }
 
     private void AddGroups()

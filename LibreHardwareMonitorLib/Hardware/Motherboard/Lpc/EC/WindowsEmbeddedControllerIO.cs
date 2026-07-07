@@ -32,11 +32,19 @@ public class WindowsEmbeddedControllerIO : IEmbeddedControllerIO
 
     public WindowsEmbeddedControllerIO()
     {
-        _pawnModule = new LpcAcpiEc();
+        LpcAcpiEc pawnModule = new();
 
-        if (!Mutexes.WaitEc(10))
+        try
         {
-            throw new BusMutexLockingFailedException();
+            if (!Mutexes.WaitEc(10))
+                throw new BusMutexLockingFailedException();
+
+            _pawnModule = pawnModule;
+        }
+        catch
+        {
+            pawnModule.Close();
+            throw;
         }
     }
 
@@ -73,8 +81,14 @@ public class WindowsEmbeddedControllerIO : IEmbeddedControllerIO
         if (!_disposed)
         {
             _disposed = true;
-            Mutexes.ReleaseEc();
-            _pawnModule.Close();
+            try
+            {
+                Mutexes.ReleaseEc();
+            }
+            finally
+            {
+                _pawnModule.Close();
+            }
         }
     }
 

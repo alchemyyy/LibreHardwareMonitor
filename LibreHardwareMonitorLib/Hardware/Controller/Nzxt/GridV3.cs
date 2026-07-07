@@ -16,6 +16,7 @@ namespace LibreHardwareMonitor.Hardware.Controller.Nzxt;
 internal sealed class GridV3 : Hardware
 {
     private const int FANS_COUNT = 6;
+    private const int READ_THREAD_JOIN_TIMEOUT_MS = 1000;
 
     // Some initialization messages to send to the controller. No visible effects but NZXT CAM send them.
     private static readonly byte[] _initialize1 = { 0x01, 0x5c };
@@ -30,8 +31,10 @@ internal sealed class GridV3 : Hardware
     private readonly Dictionary<int, byte[]> _rawData = new();
     private readonly Sensor[] _rpmSensors = new Sensor[FANS_COUNT];
     private readonly byte[] _setFanSpeedMsg;
+    private readonly Thread _readThread;
     private readonly HidStream _stream;
     private readonly Sensor[] _voltages = new Sensor[FANS_COUNT];
+    private volatile bool _readThreadStopRequested;
 
     public GridV3(HidDevice dev, ISettings settings) : base("NZXT GRID+ V3", new Identifier(dev), settings)
     {
@@ -90,8 +93,8 @@ internal sealed class GridV3 : Hardware
             _noise = new Sensor("GRID Noise", 0, SensorType.Noise, this, Array.Empty<ParameterDescription>(), settings);
             ActivateSensor(_noise);
 
-            Thread readGridReports = new(ContinuousRead) { IsBackground = true };
-            readGridReports.Start(_rawData);
+            _readThread = new Thread(ContinuousRead) { IsBackground = true };
+            _readThread.Start(_rawData);
 
             IsValid = true;
         }
@@ -133,17 +136,22 @@ internal sealed class GridV3 : Hardware
 
     public override void Close()
     {
+        _readThreadStopRequested = true;
         _stream?.Close();
+        _readThread?.Join(READ_THREAD_JOIN_TIMEOUT_MS);
         base.Close();
     }
 
     private void ContinuousRead(object state)
     {
         byte[] buffer = new byte[_rawData[0].Length];
-        while (_stream.CanRead)
+        while (!_readThreadStopRequested)
         {
             try
             {
+                if (!_stream.CanRead)
+                    return;
+
                 _stream.Read(buffer); // This is a blocking call, will wait for bytes to become available
                 if (buffer[0] == 0x04)
                 {

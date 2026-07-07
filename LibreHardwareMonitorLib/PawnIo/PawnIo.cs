@@ -75,15 +75,28 @@ public class PawnIo
         if (handle.IsInvalid)
             return new PawnIo(null);
 
-        using Stream stream = assembly.GetManifestResourceStream(resourceName);
-        using MemoryStream memory = new();
-        stream.CopyTo(memory);
-        byte[] bin = memory.ToArray();
+        bool handleTransferred = false;
 
-        fixed (byte* pIn = bin)
+        try
         {
-            if (PInvoke.DeviceIoControl((HANDLE)handle.DangerousGetHandle(), (uint)ControlCode.LoadBinary, pIn, (uint)bin.Length, null, 0u, null, null))
-                return new PawnIo(handle);
+            using Stream stream = assembly.GetManifestResourceStream(resourceName);
+            using MemoryStream memory = new();
+            stream.CopyTo(memory);
+            byte[] bin = memory.ToArray();
+
+            fixed (byte* pIn = bin)
+            {
+                if (PInvoke.DeviceIoControl((HANDLE)handle.DangerousGetHandle(), (uint)ControlCode.LoadBinary, pIn, (uint)bin.Length, null, 0u, null, null))
+                {
+                    handleTransferred = true;
+                    return new PawnIo(handle);
+                }
+            }
+        }
+        finally
+        {
+            if (!handleTransferred)
+                handle.Dispose();
         }
 
         return new PawnIo(null);

@@ -6,16 +6,27 @@
 
 namespace LibreHardwareMonitor.Hardware.Motherboard.Lpc;
 
-internal class LpcPort
+internal class LpcPort : System.IDisposable
 {
-    private PawnIo.LpcIo _pawnModule;
+    private readonly PawnIo.LpcIo _pawnModule;
+    private bool _closed;
 
     public LpcPort(ushort registerPort, ushort valuePort)
     {
         RegisterPort = registerPort;
         ValuePort = valuePort;
-        _pawnModule = new PawnIo.LpcIo();
-        _pawnModule.SelectSlot(registerPort == 0x2e ? 0 : 1);
+
+        PawnIo.LpcIo pawnModule = new();
+        try
+        {
+            pawnModule.SelectSlot(registerPort == 0x2e ? 0 : 1);
+            _pawnModule = pawnModule;
+        }
+        catch
+        {
+            pawnModule.Close();
+            throw;
+        }
     }
 
     public ushort RegisterPort { get; }
@@ -113,7 +124,19 @@ internal class LpcPort
         _pawnModule.WritePort(RegisterPort, 0xAA);
     }
 
-    public void Close() => _pawnModule.Close();
+    public void Close()
+    {
+        if (_closed)
+            return;
+
+        _closed = true;
+        _pawnModule.Close();
+    }
+
+    public void Dispose()
+    {
+        Close();
+    }
 
     // ReSharper disable InconsistentNaming
     private const byte CONFIGURATION_CONTROL_REGISTER = 0x02;

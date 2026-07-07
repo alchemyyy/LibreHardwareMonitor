@@ -85,7 +85,10 @@ internal sealed class KrakenV3 : Hardware
             }
 
             if (FirmwareVersion == null)
+            {
+                _stream.Close();
                 return;
+            }
 
             // Liquid temperature
             _temperature = new Sensor("Liquid", 0, SensorType.Temperature, this, [], settings);
