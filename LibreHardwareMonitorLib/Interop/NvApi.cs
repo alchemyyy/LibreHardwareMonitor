@@ -57,6 +57,9 @@ internal static class NvApi
 
     public static void Initialize()
     {
+        if (IsAvailable)
+            return;
+
         NvAPI_InitializeDelegate nvApiInitialize;
 
         try

@@ -65,7 +65,23 @@ internal static class D3DDisplayDevice
         if (status != NTSTATUS.STATUS_SUCCESS)
             return false;
 
-        GetAdapterType(out status, adapter, out D3DKMT_ADAPTERTYPE adapterType);
+        bool querySucceeded = false;
+        NTSTATUS closeStatus = default;
+        try
+        {
+            querySucceeded = TryGetDeviceInfo(adapter, deviceInfo);
+        }
+        finally
+        {
+            CloseAdapter(out closeStatus, adapter);
+        }
+
+        return querySucceeded && closeStatus == NTSTATUS.STATUS_SUCCESS;
+    }
+
+    private static bool TryGetDeviceInfo(D3DKMT_OPENADAPTERFROMDEVICENAME adapter, D3DDeviceInfo deviceInfo)
+    {
+        GetAdapterType(out NTSTATUS status, adapter, out D3DKMT_ADAPTERTYPE adapterType);
         if (status != NTSTATUS.STATUS_SUCCESS)
             return false;
 
@@ -135,8 +151,7 @@ internal static class D3DDisplayDevice
             }
         }
 
-        CloseAdapter(out status, adapter);
-        return status == NTSTATUS.STATUS_SUCCESS;
+        return true;
     }
 
     private static string GetNodeEngineTypeString(D3DKMT_NODEMETADATA nodeMetaData)

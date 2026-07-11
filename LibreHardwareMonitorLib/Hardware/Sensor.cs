@@ -155,7 +155,7 @@ internal class Sensor : ISensor
         {
             _valuesTimeWindow = value;
             if (value == TimeSpan.Zero)
-                _values.Clear();
+                ReleaseValueHistory();
         }
     }
 
@@ -171,7 +171,7 @@ internal class Sensor : ISensor
 
     public void ClearValues()
     {
-        _values.Clear();
+        ReleaseValueHistory();
     }
 
     public void Accept(IVisitor visitor)
@@ -272,5 +272,11 @@ internal class Sensor : ISensor
         }
 
         _values.Add(new SensorValue(value, time));
+    }
+
+    private void ReleaseValueHistory()
+    {
+        _values.Clear();
+        _values.TrimExcess();
     }
 }
