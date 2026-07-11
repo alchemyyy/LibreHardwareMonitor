@@ -69,7 +69,7 @@ internal static class D3DDisplayDevice
         NTSTATUS closeStatus = default;
         try
         {
-            querySucceeded = TryGetDeviceInfo(adapter, deviceInfo);
+            querySucceeded = TryGetDeviceInfo(adapter, ref deviceInfo);
         }
         finally
         {
@@ -79,7 +79,7 @@ internal static class D3DDisplayDevice
         return querySucceeded && closeStatus == NTSTATUS.STATUS_SUCCESS;
     }
 
-    private static bool TryGetDeviceInfo(D3DKMT_OPENADAPTERFROMDEVICENAME adapter, D3DDeviceInfo deviceInfo)
+    private static bool TryGetDeviceInfo(D3DKMT_OPENADAPTERFROMDEVICENAME adapter, ref D3DDeviceInfo deviceInfo)
     {
         GetAdapterType(out NTSTATUS status, adapter, out D3DKMT_ADAPTERTYPE adapterType);
         if (status != NTSTATUS.STATUS_SUCCESS)
